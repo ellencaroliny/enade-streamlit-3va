@@ -1,0 +1,28 @@
+# Banco de dados SQLite
+*.db
+
+# Dumps SQL grandes
+Dump_*.sql
+
+# Arquivos de design
+*.mwb
+*.pdf
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv
+
+# Streamlit
+.streamlit/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
