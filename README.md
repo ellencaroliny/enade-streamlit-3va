@@ -97,6 +97,3 @@ A aplicação estará disponível em `http://localhost:8501`
 
 Este projeto foi desenvolvido para fins acadêmicos.
 
-## 👥 Autores
-
-Ellen Caroliny - [@ellencaroliny](https://github.com/ellencaroliny)
