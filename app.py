@@ -7,6 +7,29 @@ import streamlit as st
 
 DB_PATH = Path(__file__).parent / "enade_dw.db"
 
+# Verificar se o banco de dados existe
+if not DB_PATH.exists():
+    st.error("""
+    ⚠️ **Banco de dados não encontrado!**
+
+    O arquivo `enade_dw.db` não está presente no repositório devido ao seu tamanho (88 MB).
+
+    **Para usar esta aplicação localmente:**
+    1. Faça o download do banco de dados `enade_dw.db`
+    2. Coloque-o na mesma pasta do arquivo `app.py`
+    3. Execute novamente com: `streamlit run app.py`
+
+    **Para deploy no Streamlit Cloud:**
+    - O banco de dados precisa estar incluído no repositório, ou
+    - Use uma solução de armazenamento externa (como AWS S3, Google Drive, etc.)
+
+    📊 **Dados disponíveis:**
+    - Total de registros: 714.580
+    - Anos: 2018, 2019, 2021, 2022, 2023
+    - Tamanho do banco: ~88 MB
+    """)
+    st.stop()
+
 
 @st.cache_resource
 def get_connection():
