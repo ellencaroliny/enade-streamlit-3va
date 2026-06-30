@@ -1,5 +1,5 @@
 # Banco de dados SQLite
-*.db
+# *.db  # Comentado para permitir enade_dw.db no deploy
 
 # Dumps SQL grandes
 Dump_*.sql
