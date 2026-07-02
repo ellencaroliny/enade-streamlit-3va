@@ -416,7 +416,7 @@ with tab3:
     else:
         col1, col2 = st.columns(2)
         with col1:
-            fig = px.bar(perf_reg, x="nome_regiao", y="Média", color="Quantidade", title="Média por Região", text_auto=".1f")
+            fig = px.bar(perf_reg, y="nome_regiao", x="Média", color="Quantidade", title="Média por Região", text_auto=".1f", orientation="h")
             st.plotly_chart(fig, width='stretch')
         with col2:
             if len(perf_reg) > 1:
