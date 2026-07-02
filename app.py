@@ -3,7 +3,12 @@ from pathlib import Path
 
 import pandas as pd
 import plotly.express as px
+import plotly.io as pio
 import streamlit as st
+
+pio.templates["custom"] = pio.templates["plotly_white"]
+pio.templates["custom"].layout.font = {"family": "Arial, sans-serif"}
+pio.templates.default = "custom"
 
 DB_PATH = Path(__file__).parent / "enade_dw.db"
 
@@ -35,6 +40,7 @@ if not DB_PATH.exists():
 def get_connection():
     conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.text_factory = lambda x: x.decode("utf-8", errors="replace")
     return conn
 
 
@@ -59,6 +65,7 @@ def get_simple_query(
     modalidade=None,
     categoria=None,
     limit=None,
+    random_limit=None,
     force_curso=False,
     force_estudante=False,
 ):
@@ -133,7 +140,9 @@ def get_simple_query(
     query = "SELECT " + ", ".join(select_cols)
     query += " FROM " + ", ".join(tables)
     query += " WHERE " + " AND ".join(wheres)
-    if limit:
+    if random_limit:
+        query += f" ORDER BY RANDOM() LIMIT {random_limit}"
+    elif limit:
         query += f" LIMIT {limit}"
     return query
 
@@ -214,9 +223,9 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 
 MAX_ROWS = 100000
 if filters_active:
-    df = query_data(get_simple_query(**params, limit=MAX_ROWS))
+    df = query_data(get_simple_query(**params, random_limit=MAX_ROWS))
 else:
-    df = query_data(get_simple_query(limit=MAX_ROWS))
+    df = query_data(get_simple_query(random_limit=MAX_ROWS))
 
 with tab1:
     st.subheader("Indicadores Gerais")
@@ -253,8 +262,8 @@ with tab1:
             if available:
                 means = df[available].mean().reset_index()
                 means.columns = ["Componente", "Média"]
-                fig = px.bar(means, x="Componente", y="Média", title="Média por Componente de Nota")
-                fig.update_layout(height=350, xaxis_tickangle=45)
+                fig = px.bar(means, y="Componente", x="Média", title="Média por Componente de Nota", orientation="h")
+                fig.update_layout(height=350)
                 st.plotly_chart(fig, width='stretch')
 
         st.subheader("Estatísticas Descritivas")
@@ -298,24 +307,24 @@ with tab2:
                 )
                 perf_dim.columns = [dim_choice, "Média", "Quantidade"]
                 fig = px.bar(
-                    perf_dim.head(20), x=dim_choice, y="Média",
+                    perf_dim, x="Média", y=dim_choice,
                     color="Quantidade",
-                    title=f"Média da Nota Geral por {dim_choice} (Top 20)",
+                    title=f"Média da Nota Geral por {dim_choice}",
                     text_auto=".1f",
+                    orientation="h",
                 )
-                fig.update_layout(xaxis_tickangle=45, height=450)
+                fig.update_layout(height=600)
                 st.plotly_chart(fig, width='stretch')
 
         if "sexo" in df.columns and "cor_raca" in df.columns:
             col1, col2 = st.columns(2)
             with col1:
                 perf_sexo = df.groupby("sexo")["nota_geral"].mean().reset_index()
-                fig = px.bar(perf_sexo, x="sexo", y="nota_geral", title="Média por Sexo")
+                fig = px.bar(perf_sexo, y="sexo", x="nota_geral", title="Média por Sexo", orientation="h")
                 st.plotly_chart(fig, width='stretch')
             with col2:
                 perf_cor = df.groupby("cor_raca")["nota_geral"].mean().reset_index().sort_values("nota_geral", ascending=False)
-                fig = px.bar(perf_cor, x="cor_raca", y="nota_geral", title="Média por Cor/Raça")
-                fig.update_layout(xaxis_tickangle=45)
+                fig = px.bar(perf_cor, y="cor_raca", x="nota_geral", title="Média por Cor/Raça", orientation="h")
                 st.plotly_chart(fig, width='stretch')
 
 with tab3:
@@ -323,7 +332,7 @@ with tab3:
 
     # Carregar dados com dimensão curso sempre para essa aba
     params_geo = params.copy()
-    df_geo = query_data(get_simple_query(**params_geo, force_curso=True, limit=MAX_ROWS))
+    df_geo = query_data(get_simple_query(**params_geo, force_curso=True, random_limit=MAX_ROWS))
 
     has_geo = "nome_regiao" in df_geo.columns and "uf" in df_geo.columns
     if df_geo.empty or not has_geo:
@@ -347,8 +356,8 @@ with tab3:
         perf_uf = df.groupby("uf").agg(
             Média=("nota_geral", "mean"), Quantidade=("nota_geral", "count")
         ).reset_index().sort_values("Média", ascending=False)
-        fig = px.bar(perf_uf, x="uf", y="Média", color="Quantidade", title="Média por UF", text_auto=".1f")
-        fig.update_layout(height=450)
+        fig = px.bar(perf_uf, y="uf", x="Média", color="Quantidade", title="Média por UF", text_auto=".1f", orientation="h")
+        fig.update_layout(height=600)
         st.plotly_chart(fig, width='stretch')
 
 with tab4:
@@ -356,7 +365,7 @@ with tab4:
 
     # Carregar dados com dimensão estudante sempre para essa aba
     params_estudante = params.copy()
-    df_perfil = query_data(get_simple_query(**params_estudante, force_estudante=True, limit=MAX_ROWS))
+    df_perfil = query_data(get_simple_query(**params_estudante, force_estudante=True, random_limit=MAX_ROWS))
 
     has_perfil = "sexo" in df_perfil.columns and "cor_raca" in df_perfil.columns
     if df_perfil.empty or not has_perfil:
@@ -367,41 +376,35 @@ with tab4:
         with col1:
             perf = df.groupby(["sexo", "cor_raca"])["nota_geral"].mean().reset_index()
             fig = px.bar(perf, x="cor_raca", y="nota_geral", color="sexo", barmode="group", title="Nota Geral por Sexo e Cor/Raça")
-            fig.update_layout(xaxis_tickangle=45)
             st.plotly_chart(fig, width='stretch')
         with col2:
             if "renda_familiar" in df.columns:
                 perf_renda = df.groupby("renda_familiar")["nota_geral"].mean().reset_index()
-                fig = px.bar(perf_renda, x="renda_familiar", y="nota_geral", title="Média por Renda Familiar")
-                fig.update_layout(xaxis_tickangle=45)
+                fig = px.bar(perf_renda, y="renda_familiar", x="nota_geral", title="Média por Renda Familiar", orientation="h")
                 st.plotly_chart(fig, width='stretch')
 
         col1, col2 = st.columns(2)
         with col1:
             if "tipo_escola_ensino_medio" in df.columns:
                 perf_esc = df.groupby("tipo_escola_ensino_medio")["nota_geral"].mean().reset_index()
-                fig = px.bar(perf_esc, x="tipo_escola_ensino_medio", y="nota_geral", title="Média por Tipo de Escola (Ensino Médio)")
-                fig.update_layout(xaxis_tickangle=45)
+                fig = px.bar(perf_esc, y="tipo_escola_ensino_medio", x="nota_geral", title="Média por Tipo de Escola (Ensino Médio)", orientation="h")
                 st.plotly_chart(fig, width='stretch')
         with col2:
             if "escolaridade_pai" in df.columns:
                 perf_pai = df.groupby("escolaridade_pai")["nota_geral"].mean().reset_index().sort_values("nota_geral", ascending=False)
-                fig = px.bar(perf_pai, x="escolaridade_pai", y="nota_geral", title="Média por Escolaridade do Pai")
-                fig.update_layout(xaxis_tickangle=45)
+                fig = px.bar(perf_pai, y="escolaridade_pai", x="nota_geral", title="Média por Escolaridade do Pai", orientation="h")
                 st.plotly_chart(fig, width='stretch')
 
         col1, col2 = st.columns(2)
         with col1:
             if "horas_trabalho" in df.columns:
                 perf_hr = df.groupby("horas_trabalho")["nota_geral"].mean().reset_index()
-                fig = px.bar(perf_hr, x="horas_trabalho", y="nota_geral", title="Média por Carga Horária de Trabalho")
-                fig.update_layout(xaxis_tickangle=45)
+                fig = px.bar(perf_hr, y="horas_trabalho", x="nota_geral", title="Média por Carga Horária de Trabalho", orientation="h")
                 st.plotly_chart(fig, width='stretch')
         with col2:
             if "cotas" in df.columns:
                 perf_cotas = df.groupby("cotas")["nota_geral"].mean().reset_index().sort_values("nota_geral", ascending=False)
-                fig = px.bar(perf_cotas.head(15), x="cotas", y="nota_geral", title="Média por Tipo de Cota (Top 15)")
-                fig.update_layout(xaxis_tickangle=45)
+                fig = px.bar(perf_cotas, y="cotas", x="nota_geral", title="Média por Tipo de Cota", orientation="h")
                 st.plotly_chart(fig, width='stretch')
 
 with tab5:
@@ -435,14 +438,12 @@ with tab5:
         with col1:
             if "avaliacao_da_relacao_extensao_tempo_prova" in df.columns and "nota_geral" in df.columns:
                 perf_tmp = df.groupby("avaliacao_da_relacao_extensao_tempo_prova")["nota_geral"].mean().reset_index()
-                fig = px.bar(perf_tmp, x="avaliacao_da_relacao_extensao_tempo_prova", y="nota_geral", title="Nota Geral vs. Relação Extensão/Tempo")
-                fig.update_layout(xaxis_tickangle=45)
+                fig = px.bar(perf_tmp, y="avaliacao_da_relacao_extensao_tempo_prova", x="nota_geral", title="Nota Geral vs. Relação Extensão/Tempo", orientation="h")
                 st.plotly_chart(fig, width='stretch')
         with col2:
             if "tempo_de_prova" in df.columns and "nota_geral" in df.columns:
                 perf_tp = df.groupby("tempo_de_prova")["nota_geral"].mean().reset_index()
-                fig = px.bar(perf_tp, x="tempo_de_prova", y="nota_geral", title="Nota Geral vs. Tempo de Prova")
-                fig.update_layout(xaxis_tickangle=45)
+                fig = px.bar(perf_tp, y="tempo_de_prova", x="nota_geral", title="Nota Geral vs. Tempo de Prova", orientation="h")
                 st.plotly_chart(fig, width='stretch')
 
         if "avaliacao_equipamentos_curso" in df.columns and "avaliacao_ambiente_curso" in df.columns:
@@ -450,14 +451,12 @@ with tab5:
             with col1:
                 if "nota_geral" in df.columns:
                     perf_eq = df.groupby("avaliacao_equipamentos_curso")["nota_geral"].mean().reset_index()
-                    fig = px.bar(perf_eq, x="avaliacao_equipamentos_curso", y="nota_geral", title="Nota Geral vs. Avaliação dos Equipamentos")
-                    fig.update_layout(xaxis_tickangle=45)
+                    fig = px.bar(perf_eq, y="avaliacao_equipamentos_curso", x="nota_geral", title="Nota Geral vs. Avaliação dos Equipamentos", orientation="h")
                     st.plotly_chart(fig, width='stretch')
             with col2:
                 if "nota_geral" in df.columns:
                     perf_amb = df.groupby("avaliacao_ambiente_curso")["nota_geral"].mean().reset_index()
-                    fig = px.bar(perf_amb, x="avaliacao_ambiente_curso", y="nota_geral", title="Nota Geral vs. Avaliação do Ambiente")
-                    fig.update_layout(xaxis_tickangle=45)
+                    fig = px.bar(perf_amb, y="avaliacao_ambiente_curso", x="nota_geral", title="Nota Geral vs. Avaliação do Ambiente", orientation="h")
                     st.plotly_chart(fig, width='stretch')
 
 with tab6:
