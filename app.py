@@ -332,7 +332,7 @@ with tab3:
 
     # Carregar dados com dimensão curso sempre para essa aba
     params_geo = params.copy()
-    df_geo = query_data(get_simple_query(**params_geo, force_curso=True, random_limit=MAX_ROWS))
+    df_geo = query_data(get_simple_query(**params_geo, force_curso=True))
 
     has_geo = "nome_regiao" in df_geo.columns and "uf" in df_geo.columns
     if df_geo.empty or not has_geo:
@@ -375,7 +375,7 @@ with tab4:
         col1, col2 = st.columns(2)
         with col1:
             perf = df.groupby(["sexo", "cor_raca"])["nota_geral"].mean().reset_index()
-            fig = px.bar(perf, x="cor_raca", y="nota_geral", color="sexo", barmode="group", title="Nota Geral por Sexo e Cor/Raça")
+            fig = px.bar(perf, y="cor_raca", x="nota_geral", color="sexo", barmode="group", title="Nota Geral por Sexo e Cor/Raça", orientation="h")
             st.plotly_chart(fig, width='stretch')
         with col2:
             if "renda_familiar" in df.columns:
@@ -421,8 +421,8 @@ with tab5:
                 dif_fg = df.groupby("grau_dificuldade_prova_formacao_geral")["nota_geral"].mean().reset_index()
                 dif_fg["ordem"] = dif_fg["grau_dificuldade_prova_formacao_geral"].apply(lambda x: ordem.index(x) if x in ordem else 99)
                 dif_fg = dif_fg.sort_values("ordem")
-                fig = px.line(dif_fg, x="grau_dificuldade_prova_formacao_geral", y="nota_geral", markers=True, title="Nota Geral vs. Dificuldade (Formação Geral)")
-                fig.update_layout(xaxis_categoryorder="array", xaxis_categoryarray=ordem)
+                fig = px.line(dif_fg, y="grau_dificuldade_prova_formacao_geral", x="nota_geral", markers=True, title="Nota Geral vs. Dificuldade (Formação Geral)")
+                fig.update_layout(yaxis_categoryorder="array", yaxis_categoryarray=list(reversed(ordem)))
                 st.plotly_chart(fig, width='stretch')
         with col2:
             if "nota_componente_especifico" in df.columns:
@@ -430,8 +430,8 @@ with tab5:
                 dif_ce = df.groupby("grau_dificuldade_prova_componente_especifico")["nota_componente_especifico"].mean().reset_index()
                 dif_ce["ordem"] = dif_ce["grau_dificuldade_prova_componente_especifico"].apply(lambda x: ordem.index(x) if x in ordem else 99)
                 dif_ce = dif_ce.sort_values("ordem")
-                fig = px.line(dif_ce, x="grau_dificuldade_prova_componente_especifico", y="nota_componente_especifico", markers=True, title="Nota Comp. Específico vs. Dificuldade")
-                fig.update_layout(xaxis_categoryorder="array", xaxis_categoryarray=ordem)
+                fig = px.line(dif_ce, y="grau_dificuldade_prova_componente_especifico", x="nota_componente_especifico", markers=True, title="Nota Comp. Específico vs. Dificuldade")
+                fig.update_layout(yaxis_categoryorder="array", yaxis_categoryarray=list(reversed(ordem)))
                 st.plotly_chart(fig, width='stretch')
 
         col1, col2 = st.columns(2)
