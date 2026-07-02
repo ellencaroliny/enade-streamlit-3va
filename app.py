@@ -167,10 +167,11 @@ def get_simple_query(
 
 
 def build_geo_region_query(anos=None, regioes=None, ufs=None, cursos=None):
-    wheres = []
+    tempo_join = "LEFT JOIN dim_tempo t ON f.sk_tempo = t.sk_tempo"
+    wheres = ["c.nome_regiao != 'Não Informado'"]
     if anos:
         anos_str = ", ".join(str(a) for a in anos)
-        wheres.append(f"t.ano_enade IN ({anos_str})")
+        tempo_join += f" AND t.ano_enade IN ({anos_str})"
     if regioes:
         reg_str = ", ".join(f"'{r}'" for r in regioes)
         wheres.append(f"c.nome_regiao IN ({reg_str})")
@@ -180,24 +181,24 @@ def build_geo_region_query(anos=None, regioes=None, ufs=None, cursos=None):
     if cursos:
         cur_str = ", ".join(f"'{c}'" for c in cursos)
         wheres.append(f"c.nome_curso IN ({cur_str})")
-    where_sql = " AND ".join(wheres) if wheres else "1=1"
 
     return f"""
         SELECT c.nome_regiao, AVG(f.nota_geral) as Média, COUNT(f.nota_geral) as Quantidade
         FROM dim_curso c
         LEFT JOIN fato_enade f ON f.sk_curso = c.sk_curso
-        LEFT JOIN dim_tempo t ON f.sk_tempo = t.sk_tempo
-        WHERE c.nome_regiao != 'Não Informado' AND {where_sql}
+        {tempo_join}
+        WHERE {' AND '.join(wheres)}
         GROUP BY c.nome_regiao
         ORDER BY Média DESC
     """
 
 
 def build_geo_uf_query(anos=None, regioes=None, ufs=None, cursos=None):
-    wheres = []
+    tempo_join = "LEFT JOIN dim_tempo t ON f.sk_tempo = t.sk_tempo"
+    wheres = ["c.uf != 'NI'"]
     if anos:
         anos_str = ", ".join(str(a) for a in anos)
-        wheres.append(f"t.ano_enade IN ({anos_str})")
+        tempo_join += f" AND t.ano_enade IN ({anos_str})"
     if regioes:
         reg_str = ", ".join(f"'{r}'" for r in regioes)
         wheres.append(f"c.nome_regiao IN ({reg_str})")
@@ -207,14 +208,13 @@ def build_geo_uf_query(anos=None, regioes=None, ufs=None, cursos=None):
     if cursos:
         cur_str = ", ".join(f"'{c}'" for c in cursos)
         wheres.append(f"c.nome_curso IN ({cur_str})")
-    where_sql = " AND ".join(wheres) if wheres else "1=1"
 
     return f"""
         SELECT c.uf, AVG(f.nota_geral) as Média, COUNT(f.nota_geral) as Quantidade
         FROM dim_curso c
         LEFT JOIN fato_enade f ON f.sk_curso = c.sk_curso
-        LEFT JOIN dim_tempo t ON f.sk_tempo = t.sk_tempo
-        WHERE c.uf != 'NI' AND {where_sql}
+        {tempo_join}
+        WHERE {' AND '.join(wheres)}
         GROUP BY c.uf
         ORDER BY Média DESC
     """
@@ -421,15 +421,17 @@ with tab3:
         with col2:
             if len(perf_reg) > 1:
                 anos = geo_params["anos"]
-                anos_where = f"AND t.ano_enade IN ({', '.join(str(a) for a in anos)})" if anos else ""
+                tempo_join = "LEFT JOIN dim_tempo t ON f.sk_tempo = t.sk_tempo"
+                if anos:
+                    anos_str = ", ".join(str(a) for a in anos)
+                    tempo_join += f" AND t.ano_enade IN ({anos_str})"
                 heat_sql = f"""
                     SELECT c.nome_regiao, c.modalidade_graduacao, AVG(f.nota_geral) as media
                     FROM dim_curso c
                     LEFT JOIN fato_enade f ON f.sk_curso = c.sk_curso
-                    LEFT JOIN dim_tempo t ON f.sk_tempo = t.sk_tempo
+                    {tempo_join}
                     WHERE c.nome_regiao != 'Não Informado'
                     AND c.modalidade_graduacao NOT IN ('Não Informado', '')
-                    {anos_where}
                     GROUP BY c.nome_regiao, c.modalidade_graduacao
                 """
                 heat_df = query_data(heat_sql)
