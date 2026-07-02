@@ -54,7 +54,7 @@ def cached_query(sql: str) -> pd.DataFrame:
     return query_data(sql)
 
 
-def get_simple_query(
+def _build_query_parts(
     anos=None,
     regioes=None,
     ufs=None,
@@ -64,15 +64,12 @@ def get_simple_query(
     renda=None,
     modalidade=None,
     categoria=None,
-    limit=None,
-    random_limit=None,
     force_curso=False,
     force_estudante=False,
 ):
     wheres = ["f.sk_avaliacao = a.sk_avaliacao"]
     tables = ["fato_enade f", "dim_avaliacao a"]
 
-    # Sempre incluir dim_tempo para ter ano_enade disponível
     tables.append("dim_tempo t")
     wheres.append("f.sk_tempo = t.sk_tempo")
 
@@ -116,6 +113,28 @@ def get_simple_query(
         wheres.append(f"e.renda_familiar IN ({ren_str})")
 
     tables = list(dict.fromkeys(tables))
+    return tables, wheres, needs_curso, needs_estudante
+
+
+def get_simple_query(
+    anos=None,
+    regioes=None,
+    ufs=None,
+    cursos=None,
+    sexo=None,
+    cor_raca=None,
+    renda=None,
+    modalidade=None,
+    categoria=None,
+    limit=None,
+    random_limit=None,
+    force_curso=False,
+    force_estudante=False,
+):
+    tables, wheres, needs_curso, needs_estudante = _build_query_parts(
+        anos, regioes, ufs, cursos, sexo, cor_raca, renda,
+        modalidade, categoria, force_curso, force_estudante,
+    )
 
     select_cols = ["f.*"]
     select_cols.append("a.grau_dificuldade_prova_formacao_geral")
@@ -144,6 +163,35 @@ def get_simple_query(
         query += f" ORDER BY RANDOM() LIMIT {random_limit}"
     elif limit:
         query += f" LIMIT {limit}"
+    return query
+
+
+def get_agg_query(
+    group_col,
+    table_alias="c",
+    anos=None,
+    regioes=None,
+    ufs=None,
+    cursos=None,
+    sexo=None,
+    cor_raca=None,
+    renda=None,
+    modalidade=None,
+    categoria=None,
+):
+    force_curso = table_alias == "c"
+    force_estudante = table_alias == "e"
+    tables, wheres, _, _ = _build_query_parts(
+        anos, regioes, ufs, cursos, sexo, cor_raca, renda,
+        modalidade, categoria,
+        force_curso=force_curso, force_estudante=force_estudante,
+    )
+
+    query = f"SELECT {table_alias}.{group_col} as \"{group_col}\", AVG(f.nota_geral) as Média, COUNT(*) as Quantidade"
+    query += " FROM " + ", ".join(tables)
+    query += " WHERE " + " AND ".join(wheres)
+    query += f" GROUP BY {table_alias}.{group_col}"
+    query += " ORDER BY Média DESC"
     return query
 
 
@@ -330,32 +378,27 @@ with tab2:
 with tab3:
     st.subheader("Análise Geográfica")
 
-    # Carregar dados com dimensão curso sempre para essa aba
-    params_geo = params.copy()
-    df_geo = query_data(get_simple_query(**params_geo, force_curso=True))
-
-    has_geo = "nome_regiao" in df_geo.columns and "uf" in df_geo.columns
-    if df_geo.empty or not has_geo:
+    # Agregações em SQL (sem LIMIT, poucas linhas)
+    perf_reg = query_data(get_agg_query("nome_regiao", **params))
+    if perf_reg.empty:
         st.warning("Dados geográficos indisponíveis.")
     else:
-        df = df_geo
         col1, col2 = st.columns(2)
         with col1:
-            perf_reg = df.groupby("nome_regiao").agg(
-                Média=("nota_geral", "mean"), Quantidade=("nota_geral", "count")
-            ).reset_index().sort_values("Média", ascending=False)
             fig = px.bar(perf_reg, x="nome_regiao", y="Média", color="Quantidade", title="Média por Região", text_auto=".1f")
             st.plotly_chart(fig, width='stretch')
         with col2:
-            if len(df["nome_regiao"].unique()) > 1 and "modalidade_graduacao" in df.columns:
-                heat = df.pivot_table(values="nota_geral", index="nome_regiao", columns="modalidade_graduacao", aggfunc="mean")
-                fig = px.imshow(heat, text_auto=".1f", title="Nota Geral Média: Região x Modalidade", aspect="auto")
-                fig.update_layout(height=400)
-                st.plotly_chart(fig, width='stretch')
+            if len(perf_reg) > 1:
+                tables, wheres, _, _ = _build_query_parts(**params, force_curso=True)
+                heat_sql = f"SELECT c.nome_regiao, c.modalidade_graduacao, AVG(f.nota_geral) as media FROM {', '.join(tables)} WHERE {' AND '.join(wheres)} AND c.modalidade_graduacao NOT IN ('Não Informado', '') GROUP BY c.nome_regiao, c.modalidade_graduacao"
+                heat_df = query_data(heat_sql)
+                if not heat_df.empty:
+                    heat = heat_df.pivot_table(values="media", index="nome_regiao", columns="modalidade_graduacao", aggfunc="mean")
+                    fig = px.imshow(heat, text_auto=".1f", title="Nota Geral Média: Região x Modalidade", aspect="auto")
+                    fig.update_layout(height=400)
+                    st.plotly_chart(fig, width='stretch')
 
-        perf_uf = df.groupby("uf").agg(
-            Média=("nota_geral", "mean"), Quantidade=("nota_geral", "count")
-        ).reset_index().sort_values("Média", ascending=False)
+        perf_uf = query_data(get_agg_query("uf", **params))
         fig = px.bar(perf_uf, y="uf", x="Média", color="Quantidade", title="Média por UF", text_auto=".1f", orientation="h")
         fig.update_layout(height=600)
         st.plotly_chart(fig, width='stretch')
