@@ -166,33 +166,58 @@ def get_simple_query(
     return query
 
 
-def get_agg_query(
-    group_col,
-    table_alias="c",
-    anos=None,
-    regioes=None,
-    ufs=None,
-    cursos=None,
-    sexo=None,
-    cor_raca=None,
-    renda=None,
-    modalidade=None,
-    categoria=None,
-):
-    force_curso = table_alias == "c"
-    force_estudante = table_alias == "e"
-    tables, wheres, _, _ = _build_query_parts(
-        anos, regioes, ufs, cursos, sexo, cor_raca, renda,
-        modalidade, categoria,
-        force_curso=force_curso, force_estudante=force_estudante,
-    )
+def build_geo_region_query(anos=None, regioes=None, ufs=None, cursos=None):
+    wheres = []
+    if anos:
+        anos_str = ", ".join(str(a) for a in anos)
+        wheres.append(f"t.ano_enade IN ({anos_str})")
+    if regioes:
+        reg_str = ", ".join(f"'{r}'" for r in regioes)
+        wheres.append(f"c.nome_regiao IN ({reg_str})")
+    if ufs:
+        uf_str = ", ".join(f"'{u}'" for u in ufs)
+        wheres.append(f"c.uf IN ({uf_str})")
+    if cursos:
+        cur_str = ", ".join(f"'{c}'" for c in cursos)
+        wheres.append(f"c.nome_curso IN ({cur_str})")
+    where_sql = " AND ".join(wheres) if wheres else "1=1"
 
-    query = f"SELECT {table_alias}.{group_col} as \"{group_col}\", AVG(f.nota_geral) as Média, COUNT(*) as Quantidade"
-    query += " FROM " + ", ".join(tables)
-    query += " WHERE " + " AND ".join(wheres)
-    query += f" GROUP BY {table_alias}.{group_col}"
-    query += " ORDER BY Média DESC"
-    return query
+    return f"""
+        SELECT c.nome_regiao, AVG(f.nota_geral) as Média, COUNT(f.nota_geral) as Quantidade
+        FROM dim_curso c
+        LEFT JOIN fato_enade f ON f.sk_curso = c.sk_curso
+        LEFT JOIN dim_tempo t ON f.sk_tempo = t.sk_tempo
+        WHERE c.nome_regiao != 'Não Informado' AND {where_sql}
+        GROUP BY c.nome_regiao
+        ORDER BY Média DESC
+    """
+
+
+def build_geo_uf_query(anos=None, regioes=None, ufs=None, cursos=None):
+    wheres = []
+    if anos:
+        anos_str = ", ".join(str(a) for a in anos)
+        wheres.append(f"t.ano_enade IN ({anos_str})")
+    if regioes:
+        reg_str = ", ".join(f"'{r}'" for r in regioes)
+        wheres.append(f"c.nome_regiao IN ({reg_str})")
+    if ufs:
+        uf_str = ", ".join(f"'{u}'" for u in ufs)
+        wheres.append(f"c.uf IN ({uf_str})")
+    if cursos:
+        cur_str = ", ".join(f"'{c}'" for c in cursos)
+        wheres.append(f"c.nome_curso IN ({cur_str})")
+    where_sql = " AND ".join(wheres) if wheres else "1=1"
+
+    return f"""
+        SELECT c.uf, AVG(f.nota_geral) as Média, COUNT(f.nota_geral) as Quantidade
+        FROM dim_curso c
+        LEFT JOIN fato_enade f ON f.sk_curso = c.sk_curso
+        LEFT JOIN dim_tempo t ON f.sk_tempo = t.sk_tempo
+        WHERE c.uf != 'NI' AND {where_sql}
+        GROUP BY c.uf
+        ORDER BY Média DESC
+    """
 
 
 st.set_page_config(
@@ -378,8 +403,14 @@ with tab2:
 with tab3:
     st.subheader("Análise Geográfica")
 
-    # Agregações em SQL (sem LIMIT, poucas linhas)
-    perf_reg = query_data(get_agg_query("nome_regiao", **params))
+    geo_params = {
+        "anos": anos_sel or None,
+        "regioes": reg_sel or None,
+        "ufs": uf_sel or None,
+        "cursos": cursos_sel or None,
+    }
+
+    perf_reg = query_data(build_geo_region_query(**geo_params))
     if perf_reg.empty:
         st.warning("Dados geográficos indisponíveis.")
     else:
@@ -389,8 +420,18 @@ with tab3:
             st.plotly_chart(fig, width='stretch')
         with col2:
             if len(perf_reg) > 1:
-                tables, wheres, _, _ = _build_query_parts(**params, force_curso=True)
-                heat_sql = f"SELECT c.nome_regiao, c.modalidade_graduacao, AVG(f.nota_geral) as media FROM {', '.join(tables)} WHERE {' AND '.join(wheres)} AND c.modalidade_graduacao NOT IN ('Não Informado', '') GROUP BY c.nome_regiao, c.modalidade_graduacao"
+                anos = geo_params["anos"]
+                anos_where = f"AND t.ano_enade IN ({', '.join(str(a) for a in anos)})" if anos else ""
+                heat_sql = f"""
+                    SELECT c.nome_regiao, c.modalidade_graduacao, AVG(f.nota_geral) as media
+                    FROM dim_curso c
+                    LEFT JOIN fato_enade f ON f.sk_curso = c.sk_curso
+                    LEFT JOIN dim_tempo t ON f.sk_tempo = t.sk_tempo
+                    WHERE c.nome_regiao != 'Não Informado'
+                    AND c.modalidade_graduacao NOT IN ('Não Informado', '')
+                    {anos_where}
+                    GROUP BY c.nome_regiao, c.modalidade_graduacao
+                """
                 heat_df = query_data(heat_sql)
                 if not heat_df.empty:
                     heat = heat_df.pivot_table(values="media", index="nome_regiao", columns="modalidade_graduacao", aggfunc="mean")
@@ -398,7 +439,7 @@ with tab3:
                     fig.update_layout(height=400)
                     st.plotly_chart(fig, width='stretch')
 
-        perf_uf = query_data(get_agg_query("uf", **params))
+        perf_uf = query_data(build_geo_uf_query(**geo_params))
         fig = px.bar(perf_uf, y="uf", x="Média", color="Quantidade", title="Média por UF", text_auto=".1f", orientation="h")
         fig.update_layout(height=600)
         st.plotly_chart(fig, width='stretch')
