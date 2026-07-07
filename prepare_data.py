@@ -2,8 +2,12 @@ import sqlite3
 import re
 import os
 
-DW_DUMP = r"C:\Users\valcann\Downloads\modelagem\Dump_DW.sql"
-CREATE_DW = r"C:\Users\valcann\Downloads\modelagem\Create_DW.sql"
+# ATENÇÃO: Este script foi substituído pelo etl_enade.py
+# Use: python etl_enade.py
+# Ele carrega o bancoBaseEnade.sql (normalizado) e transforma para o star schema.
+
+DW_DUMP = r"C:\Users\valcann\Downloads\bancoBaseEnade.sql"
+CREATE_DW = DW_DUMP
 DB_PATH = os.path.join(os.path.dirname(__file__), "enade_dw.db")
 
 
@@ -122,11 +126,11 @@ def parse_insert_values(text: str):
 
 
 def parse_and_create_sqlite():
-    print("Lendo Create_DW.sql...")
-    with open(CREATE_DW, "r", encoding="utf-8") as f:
+    print("Lendo bancoEnadeDW.sql (DDL)...")
+    with open(CREATE_DW, "r", encoding="latin-1", errors="replace") as f:
         create_sql = f.read()
 
-    print("Lendo Dump_DW.sql...")
+    print("Lendo bancoEnadeDW.sql (dados)...")
     with open(DW_DUMP, "r", encoding="latin-1", errors="replace") as f:
         dump_content = f.read()
 
@@ -142,7 +146,7 @@ def parse_and_create_sqlite():
     if not create_blocks:
         create_blocks = re.findall(
             r"CREATE TABLE.*?`(\w+)`\s*\((.*?)\)\s*ENGINE\s*=",
-            dump_content[:500000],
+            dump_content,
             re.DOTALL | re.IGNORECASE,
         )
 

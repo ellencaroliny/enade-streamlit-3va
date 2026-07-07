@@ -12,26 +12,16 @@ pio.templates.default = "custom"
 
 DB_PATH = Path(__file__).parent / "enade_dw.db"
 
-# Verificar se o banco de dados existe
 if not DB_PATH.exists():
     st.error("""
-    ⚠️ **Banco de dados não encontrado!**
+    **Banco de dados não encontrado!**
 
-    O arquivo `enade_dw.db` não está presente no repositório devido ao seu tamanho (88 MB).
+    O arquivo `enade_dw.db` não está presente.
 
-    **Para usar esta aplicação localmente:**
-    1. Faça o download do banco de dados `enade_dw.db`
-    2. Coloque-o na mesma pasta do arquivo `app.py`
-    3. Execute novamente com: `streamlit run app.py`
-
-    **Para deploy no Streamlit Cloud:**
-    - O banco de dados precisa estar incluído no repositório, ou
-    - Use uma solução de armazenamento externa (como AWS S3, Google Drive, etc.)
-
-    📊 **Dados disponíveis:**
-    - Total de registros: 714.580
-    - Anos: 2018, 2019, 2021, 2022, 2023
-    - Tamanho do banco: ~88 MB
+    **Para criar o banco:**
+    ```
+    python etl_enade.py
+    ```
     """)
     st.stop()
 
@@ -220,6 +210,89 @@ def build_geo_uf_query(anos=None, regioes=None, ufs=None, cursos=None):
     """
 
 
+def build_olap_query(
+    rows=None,
+    cols=None,
+    measure="nota_geral",
+    agg="AVG",
+    anos=None,
+    regioes=None,
+    ufs=None,
+    cursos=None,
+    sexo=None,
+    cor_raca=None,
+    renda=None,
+    modalidade=None,
+    categoria=None,
+):
+    dim_map = {
+        "ano_enade": ("dim_tempo t", "t.ano_enade", "f.sk_tempo = t.sk_tempo"),
+        "nome_regiao": ("dim_curso c", "c.nome_regiao", "f.sk_curso = c.sk_curso"),
+        "nome_estado": ("dim_curso c", "c.nome_estado", "f.sk_curso = c.sk_curso"),
+        "uf": ("dim_curso c", "c.uf", "f.sk_curso = c.sk_curso"),
+        "nome_municipio": ("dim_curso c", "c.nome_municipio", "f.sk_curso = c.sk_curso"),
+        "nome_curso": ("dim_curso c", "c.nome_curso", "f.sk_curso = c.sk_curso"),
+        "modalidade_graduacao": ("dim_curso c", "c.modalidade_graduacao", "f.sk_curso = c.sk_curso"),
+        "turno_graduacao": ("dim_curso c", "c.turno_graduacao", "f.sk_curso = c.sk_curso"),
+        "categoria_administrativa": ("dim_curso c", "c.categoria_administrativa", "f.sk_curso = c.sk_curso"),
+        "sexo": ("dim_estudante e", "e.sexo", "f.sk_estudante = e.sk_estudante"),
+        "cor_raca": ("dim_estudante e", "e.cor_raca", "f.sk_estudante = e.sk_estudante"),
+        "renda_familiar": ("dim_estudante e", "e.renda_familiar", "f.sk_estudante = e.sk_estudante"),
+    }
+
+    tables = ["fato_enade f"]
+    joins = set()
+    select_parts = []
+    group_parts = []
+    where_parts = []
+
+    all_dims = [d for d in [rows, cols] if d]
+    for dim in all_dims:
+        if dim in dim_map:
+            tbl, col, join_cond = dim_map[dim]
+            label = tbl.split()[-1]
+            if label not in joins:
+                tables.append(tbl)
+                joins.add(label)
+                where_parts.append(join_cond)
+            select_parts.append(col)
+            group_parts.append(col)
+
+    agg_funcs = {"AVG": f"AVG(f.{measure})", "COUNT": "COUNT(*)", "SUM": f"SUM(f.{measure})", "MIN": f"MIN(f.{measure})", "MAX": f"MAX(f.{measure})"}
+    agg_col = agg_funcs.get(agg, f"AVG(f.{measure})")
+    select_parts.append(f"{agg_col} as Valor")
+
+    if anos:
+        if "t" not in joins:
+            tables.append("dim_tempo t")
+            joins.add("t")
+            where_parts.append("f.sk_tempo = t.sk_tempo")
+        anos_str = ", ".join(str(a) for a in anos)
+        where_parts.append(f"t.ano_enade IN ({anos_str})")
+
+    filter_map = {
+        "nome_regiao": regioes, "uf": ufs, "nome_curso": cursos,
+        "sexo": sexo, "cor_raca": cor_raca, "renda_familiar": renda,
+        "modalidade_graduacao": modalidade, "categoria_administrativa": categoria,
+    }
+    for dim_name, values in filter_map.items():
+        if values:
+            tbl, col, join_cond = dim_map[dim_name]
+            label = tbl.split()[-1]
+            if label not in joins:
+                tables.append(tbl)
+                joins.add(label)
+                where_parts.append(join_cond)
+            v_str = ", ".join(f"'{v}'" for v in values)
+            where_parts.append(f"{col} IN ({v_str})")
+
+    query = f"SELECT {', '.join(select_parts)} FROM {' JOIN '.join(tables)} WHERE {' AND '.join(where_parts)}"
+    if group_parts:
+        query += f" GROUP BY {', '.join(group_parts)}"
+    query += " ORDER BY Valor DESC"
+    return query
+
+
 st.set_page_config(
     page_title="Cubo ENADE - Análise de Dados",
     page_icon="📊",
@@ -288,10 +361,10 @@ params = {
     "categoria": cat_sel or None,
 }
 
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "Visão Geral", "Desempenho", "Geográfico",
     "Perfil Estudante", "Avaliação da Prova",
-    "Dados Detalhados",
+    "OLAP", "Dados Detalhados",
 ])
 
 MAX_ROWS = 100000
@@ -343,7 +416,7 @@ with tab1:
         desc = df[["nota_geral", "nota_formacao_geral", "nota_componente_especifico"]].describe().T
         desc.columns = ["Contagem", "Média", "Desvio Padrão", "Mínimo", "25%", "50%", "75%", "Máximo"]
         desc.index = ["Nota Geral", "Formação Geral", "Componente Específico"]
-        st.dataframe(desc.style.format("{:.2f}"), width='stretch')
+        st.dataframe(desc.style.format("{:.2f}"), use_container_width=True)
 
 with tab2:
     st.subheader("Análise de Desempenho")
@@ -449,7 +522,6 @@ with tab3:
 with tab4:
     st.subheader("Análise do Perfil do Estudante")
 
-    # Carregar dados com dimensão estudante sempre para essa aba
     params_estudante = params.copy()
     df_perfil = query_data(get_simple_query(**params_estudante, force_estudante=True, random_limit=MAX_ROWS))
 
@@ -546,9 +618,114 @@ with tab5:
                     st.plotly_chart(fig, width='stretch')
 
 with tab6:
+    st.subheader("Consulta OLAP")
+
+    dim_opcoes = {
+        "ano_enade": "Ano",
+        "nome_regiao": "Região",
+        "nome_estado": "Estado",
+        "uf": "UF",
+        "nome_municipio": "Município",
+        "nome_curso": "Curso",
+        "modalidade_graduacao": "Modalidade",
+        "turno_graduacao": "Turno",
+        "categoria_administrativa": "Categoria Adm.",
+        "sexo": "Sexo",
+        "cor_raca": "Cor/Raça",
+        "renda_familiar": "Renda Familiar",
+    }
+    medidas = {
+        "nota_geral": "Nota Geral",
+        "nota_formacao_geral": "Formação Geral",
+        "nota_componente_especifico": "Componente Específico",
+        "nota_parte_objetiva_formacao_geral": "Objetiva (Formação Geral)",
+        "nota_parte_discursiva_formacao_geral": "Discursiva (Formação Geral)",
+        "nota_parte_objetiva_componente_especifico": "Objetiva (Comp. Específico)",
+        "nota_parte_discursiva_componente_especifico": "Discursiva (Comp. Específico)",
+    }
+    agregacoes = {
+        "AVG": "Média",
+        "COUNT": "Contagem",
+        "SUM": "Soma",
+        "MIN": "Mínimo",
+        "MAX": "Máximo",
+    }
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        dim_linha = st.selectbox("Dimensão (linhas)", options=list(dim_opcoes.keys()), format_func=lambda x: dim_opcoes[x])
+    with col2:
+        dim_coluna_opts = {"": "(Nenhuma)"}
+        dim_coluna_opts.update(dim_opcoes)
+        dim_coluna = st.selectbox("Dimensão (colunas)", options=list(dim_coluna_opts.keys()), format_func=lambda x: dim_coluna_opts[x])
+    with col3:
+        medida = st.selectbox("Medida", options=list(medidas.keys()), format_func=lambda x: medidas[x])
+    with col4:
+        agregacao = st.selectbox("Agregação", options=list(agregacoes.keys()), format_func=lambda x: agregacoes[x])
+
+    olap_params = {
+        "rows": dim_linha,
+        "cols": dim_coluna if dim_coluna else None,
+        "measure": medida,
+        "agg": agregacao,
+        "anos": anos_sel or None,
+        "regioes": reg_sel or None,
+        "ufs": uf_sel or None,
+        "cursos": cursos_sel or None,
+        "sexo": sex_sel or None,
+        "cor_raca": cor_sel or None,
+        "renda": renda_sel or None,
+        "modalidade": modal_sel or None,
+        "categoria": cat_sel or None,
+    }
+
+    try:
+        olap_sql = build_olap_query(**olap_params)
+        olap_df = query_data(olap_sql)
+
+        if olap_df.empty:
+            st.warning("Nenhum resultado para essa consulta.")
+        else:
+            if dim_coluna:
+                pivot = olap_df.pivot_table(
+                    values="Valor",
+                    index=dim_linha,
+                    columns=dim_coluna,
+                    aggfunc="first",
+                )
+                st.dataframe(pivot.style.format("{:.2f}"), use_container_width=True)
+
+                if len(pivot) > 1 and len(pivot.columns) > 1:
+                    fig = px.imshow(
+                        pivot,
+                        text_auto=".2f",
+                        title=f"{agregacoes[agregacao]} de {medidas[medida]} por {dim_opcoes[dim_linha]} x {dim_opcoes[dim_coluna]}",
+                        aspect="auto",
+                        color_continuous_scale="RdBu_r",
+                    )
+                    fig.update_layout(height=max(400, len(pivot) * 35))
+                    st.plotly_chart(fig, width='stretch')
+            else:
+                fig = px.bar(
+                    olap_df,
+                    x="Valor",
+                    y=dim_linha,
+                    title=f"{agregacoes[agregacao]} de {medidas[medida]} por {dim_opcoes[dim_linha]}",
+                    text_auto=".2f",
+                    orientation="h",
+                )
+                fig.update_layout(height=max(400, len(olap_df) * 30))
+                st.plotly_chart(fig, width='stretch')
+
+                st.dataframe(olap_df.style.format({"Valor": "{:.2f}"}), use_container_width=True)
+
+            st.caption(f"SQL: `{olap_sql}`")
+    except Exception as e:
+        st.error(f"Erro na consulta OLAP: {e}")
+
+with tab7:
     st.subheader("Dados Detalhados")
 
-    # Limitar a 10000 registros para não sobrecarregar a visualização
     if filters_active:
         df_detail = query_data(get_simple_query(**params, limit=10000))
     else:
@@ -557,7 +734,7 @@ with tab6:
     if df_detail.empty:
         st.warning("Nenhum dado encontrado.")
     else:
-        st.dataframe(df_detail, width='stretch', height=500)
+        st.dataframe(df_detail, use_container_width=True, height=500)
         st.download_button(
             label="Download CSV",
             data=df_detail.to_csv(index=False).encode("utf-8"),
