@@ -1,5 +1,5 @@
 # Banco de dados SQLite (gerado pelo etl_enade.py)
-enade_dw.db
+# enade_dw.db  # Gerenciado pelo Git LFS
 enade_base.db
 
 # Dumps SQL grandes
