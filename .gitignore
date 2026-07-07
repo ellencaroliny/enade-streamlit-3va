@@ -1,5 +1,6 @@
-# Banco de dados SQLite
-# *.db  # Comentado para permitir enade_dw.db no deploy
+# Banco de dados SQLite (gerado pelo etl_enade.py)
+enade_dw.db
+enade_base.db
 
 # Dumps SQL grandes
 Dump_*.sql
